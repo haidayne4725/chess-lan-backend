@@ -3,9 +3,13 @@ package com.chesslan.game.mapper;
 import com.chesslan.game.model.dto.room.RoomResponseDTO;
 import com.chesslan.game.model.dto.match.MatchMoveResponseDTO;
 import com.chesslan.game.model.dto.match.MatchResponseDTO;
+import com.chesslan.game.model.dto.reward.RewardHistoryResponseDTO;
+import com.chesslan.game.model.dto.user.UserCurrencyResponseDTO;
 import com.chesslan.game.model.dto.user.UserProfileResponseDTO;
+import com.chesslan.game.model.dto.user.UserProgressionResponseDTO;
 import com.chesslan.game.model.entity.MatchEntity;
 import com.chesslan.game.model.entity.MatchMoveEntity;
+import com.chesslan.game.model.entity.RewardLog;
 import com.chesslan.game.model.entity.RoomEntity;
 import com.chesslan.game.model.entity.UserEntity;
 import org.springframework.stereotype.Component;
@@ -14,8 +18,42 @@ import java.util.List;
 
 @Component
 public class GameMapper {
-    public UserProfileResponseDTO toUserProfile(UserEntity user) {
-        return new UserProfileResponseDTO(user.getId(), user.getUsername(), user.getElo(), user.getCreatedAt());
+    public UserProfileResponseDTO toUserProfile(UserEntity user, Long nextLevelExp) {
+        return new UserProfileResponseDTO(
+                user.getId(),
+                user.getUsername(),
+                user.getLevel(),
+                user.getExp(),
+                nextLevelExp,
+                user.getGold(),
+                user.getElo(),
+                user.getTotalMatches(),
+                user.getTotalWins(),
+                user.getTotalLosses(),
+                user.getTotalDraws(),
+                user.getCreatedAt()
+        );
+    }
+
+    public UserProgressionResponseDTO toUserProgression(UserEntity user, Long nextLevelExp, int progressPercent) {
+        return new UserProgressionResponseDTO(
+                user.getLevel(),
+                user.getExp(),
+                nextLevelExp,
+                progressPercent
+        );
+    }
+
+    public UserCurrencyResponseDTO toUserCurrency(UserEntity user) {
+        return new UserCurrencyResponseDTO(user.getGold());
+    }
+
+    public RewardHistoryResponseDTO toRewardHistory(RewardLog rewardLog) {
+        return new RewardHistoryResponseDTO(
+                rewardLog.getRewardType().name(),
+                rewardLog.getAmount(),
+                rewardLog.getDescription()
+        );
     }
 
     public RoomResponseDTO toRoom(RoomEntity room) {

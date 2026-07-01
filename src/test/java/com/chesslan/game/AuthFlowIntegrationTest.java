@@ -24,10 +24,15 @@ class AuthFlowIntegrationTest {
 
         assertThat(signup.token()).isNotBlank();
         assertThat(signup.user().elo()).isEqualTo(1200);
+        assertThat(signup.user().level()).isEqualTo(1);
+        assertThat(signup.user().exp()).isZero();
+        assertThat(signup.user().gold()).isZero();
 
         var login = authService.login(new LoginRequestDTO("unity_player", "123456"));
         assertThat(login.token()).isNotBlank();
         assertThat(userService.me("unity_player").username()).isEqualTo("unity_player");
+        assertThat(userService.progression("unity_player").nextLevelExp()).isEqualTo(100L);
+        assertThat(userService.currency("unity_player").gold()).isZero();
 
         authService.logout();
     }

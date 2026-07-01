@@ -41,7 +41,7 @@ Configure environment variables when the defaults do not match your machine:
 ```bash
 export DB_URL=jdbc:postgresql://localhost:5432/chess_game
 export DB_USERNAME=postgres
-export DB_PASSWORD=123456
+export DB_PASSWORD=root
 export JWT_SECRET=your-base64url-secret-at-least-32-bytes
 ```
 
@@ -58,6 +58,64 @@ http://localhost:8080/swagger-ui/index.html
 ```
 
 For another device on the same LAN, replace `localhost` with the server PC IPv4 address.
+
+## Deploy To Render
+
+This repo is ready for Render with:
+
+- `server.port=${PORT:8080}`
+- `render.yaml` at the project root
+- support for Render-style `DATABASE_URL` values such as `postgres://...` or `postgresql://...`
+
+### Option 1: Use `render.yaml`
+
+1. Push this project to GitHub.
+2. In Render, create a PostgreSQL database named `chess-lan-postgres`.
+3. Create a new Blueprint or Web Service from the repository.
+4. Render will pick up `render.yaml` automatically.
+
+### Option 2: Manual Web Service Setup
+
+- Build Command:
+
+```bash
+./mvnw clean package
+```
+
+- Start Command:
+
+```bash
+java -jar target/chess-lan-backend-0.0.1-SNAPSHOT.jar
+```
+
+### Required Environment Variables
+
+- `JWT_SECRET`
+- `DATABASE_URL`
+
+The application can read either:
+
+- `DATABASE_URL` / `POSTGRES_URL` in Render URL format
+- or the explicit JDBC-style variables `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
+
+Example external JDBC setup:
+
+```bash
+DB_URL=jdbc:postgresql://host:5432/chess_game
+DB_USERNAME=postgres
+DB_PASSWORD=secret
+JWT_SECRET=your-base64url-secret-at-least-32-bytes
+```
+
+### Notes For Render
+
+- Health check path: `/v3/api-docs`
+- Swagger after deploy: `https://YOUR-SERVICE.onrender.com/swagger-ui.html`
+- WebSocket endpoint:
+
+```text
+wss://YOUR-SERVICE.onrender.com/ws/chess?roomCode=ABC123&token=ACCESS_TOKEN
+```
 
 ## Main REST flow
 

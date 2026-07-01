@@ -7,7 +7,9 @@ import com.chesslan.game.repository.MatchRepository;
 import com.chesslan.game.repository.UserRepository;
 import com.chesslan.game.service.interfaces.AuthService;
 import com.chesslan.game.service.interfaces.MatchService;
+import com.chesslan.game.service.interfaces.RewardService;
 import com.chesslan.game.service.interfaces.RoomService;
+import com.chesslan.game.service.interfaces.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,6 +33,12 @@ class MatchFlowIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private RewardService rewardService;
+
+    @Autowired
+    private UserService userService;
 
     @Test
     void foolMatePersistsMovesFinishesMatchAndUpdatesElo() {
@@ -61,6 +69,23 @@ class MatchFlowIntegrationTest {
                 .isEqualTo(1184);
         assertThat(userRepository.findByUsernameIgnoreCase("black_player").orElseThrow().getElo())
                 .isEqualTo(1216);
+
+        var whiteProfile = userService.me("white_player");
+        assertThat(whiteProfile.exp()).isEqualTo(30L);
+        assertThat(whiteProfile.gold()).isEqualTo(50L);
+        assertThat(whiteProfile.totalMatches()).isEqualTo(1L);
+        assertThat(whiteProfile.totalLosses()).isEqualTo(1L);
+
+        var blackProfile = userService.me("black_player");
+        assertThat(blackProfile.exp()).isEqualTo(120L);
+        assertThat(blackProfile.gold()).isEqualTo(150L);
+        assertThat(blackProfile.level()).isEqualTo(2);
+        assertThat(blackProfile.totalMatches()).isEqualTo(1L);
+        assertThat(blackProfile.totalWins()).isEqualTo(1L);
+
+        assertThat(rewardService.history("black_player"))
+                .extracting(reward -> reward.description())
+                .contains("Match Victory EXP", "Match Victory Gold", "Checkmate Bonus", "Level Up to 2");
 
         var history = matchService.history("white_player");
         assertThat(history).hasSize(1);

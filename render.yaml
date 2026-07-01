@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: chess-lan-backend
+    runtime: java
+    plan: free
+    buildCommand: ./mvnw clean package
+    startCommand: java -jar target/chess-lan-backend-0.0.1-SNAPSHOT.jar
+    healthCheckPath: /v3/api-docs
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JPA_DDL_AUTO
+        value: update
+      - key: JPA_SHOW_SQL
+        value: false
+      - key: JPA_FORMAT_SQL
+        value: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chess-lan-postgres
+          property: connectionString

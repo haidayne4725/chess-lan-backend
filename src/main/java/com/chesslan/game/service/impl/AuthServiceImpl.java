@@ -8,6 +8,7 @@ import com.chesslan.game.model.dto.auth.AuthResponseDTO;
 import com.chesslan.game.model.dto.auth.LoginRequestDTO;
 import com.chesslan.game.model.dto.auth.SignupRequestDTO;
 import com.chesslan.game.model.entity.UserEntity;
+import com.chesslan.game.repository.LevelRequirementRepository;
 import com.chesslan.game.repository.UserRepository;
 import com.chesslan.game.service.interfaces.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
+    private final LevelRequirementRepository levelRequirementRepository;
     private final GameMapper mapper;
 
     @Override
@@ -38,6 +40,13 @@ public class AuthServiceImpl implements AuthService {
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setElo(1200);
+        user.setLevel(1);
+        user.setExp(0L);
+        user.setGold(0L);
+        user.setTotalMatches(0L);
+        user.setTotalWins(0L);
+        user.setTotalLosses(0L);
+        user.setTotalDraws(0L);
         return createAuthResponse(userRepository.save(user));
     }
 
@@ -65,7 +74,12 @@ public class AuthServiceImpl implements AuthService {
         return new AuthResponseDTO(
                 jwtService.generateAccessToken(user),
                 jwtService.accessTokenExpiresInSeconds(),
-                mapper.toUserProfile(user)
+                mapper.toUserProfile(
+                        user,
+                        levelRequirementRepository.findFirstByLevelGreaterThanOrderByLevelAsc(user.getLevel())
+                                .map(levelRequirement -> levelRequirement.getRequiredExp())
+                                .orElse(null)
+                )
         );
     }
 }

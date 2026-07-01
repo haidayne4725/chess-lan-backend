@@ -20,6 +20,7 @@ import com.chesslan.game.repository.MatchRepository;
 import com.chesslan.game.repository.RoomRepository;
 import com.chesslan.game.repository.UserRepository;
 import com.chesslan.game.service.interfaces.MatchService;
+import com.chesslan.game.service.interfaces.RewardService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ public class MatchServiceImpl implements MatchService {
     private final UserRepository userRepository;
     private final ChessRulesEngine chessRulesEngine;
     private final EloCalculator eloCalculator;
+    private final RewardService rewardService;
     private final GameMapper mapper;
     private final ConcurrentHashMap<String, String> drawOffers = new ConcurrentHashMap<>();
 
@@ -245,6 +247,7 @@ public class MatchServiceImpl implements MatchService {
         match.setTerminationReason(reason);
         match.setFinishedAt(LocalDateTime.now());
         match.getRoom().setStatus(RoomStatus.FINISHED);
+        rewardService.processMatchReward(match);
         userRepository.save(match.getWhitePlayer());
         userRepository.save(match.getBlackPlayer());
         roomRepository.save(match.getRoom());
