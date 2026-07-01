@@ -1,10 +1,8 @@
 services:
   - type: web
     name: chess-lan-backend
-    runtime: java
+    runtime: docker
     plan: free
-    buildCommand: ./mvnw clean package
-    startCommand: java -jar target/chess-lan-backend-0.0.1-SNAPSHOT.jar
     healthCheckPath: /v3/api-docs
     envVars:
       - key: JWT_SECRET
