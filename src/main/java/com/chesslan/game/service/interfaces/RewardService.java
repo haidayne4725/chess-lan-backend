@@ -1,6 +1,8 @@
 package com.chesslan.game.service.interfaces;
 
 import com.chesslan.game.model.dto.reward.RewardHistoryResponseDTO;
+import com.chesslan.game.model.dto.reward.BotMatchRewardRequestDTO;
+import com.chesslan.game.model.dto.reward.BotMatchRewardResponseDTO;
 import com.chesslan.game.model.entity.MatchEntity;
 import com.chesslan.game.model.entity.UserEntity;
 
@@ -13,4 +15,5 @@ public interface RewardService {
     void processMatchReward(MatchEntity match);
     List<RewardHistoryResponseDTO> history(String username);
     Long nextLevelExp(Integer currentLevel);
+    BotMatchRewardResponseDTO processBotMatchReward(String username, BotMatchRewardRequestDTO request);
 }

@@ -1,6 +1,9 @@
 package com.chesslan.game;
 
 import com.chesslan.game.model.dto.auth.SignupRequestDTO;
+import com.chesslan.game.model.dto.reward.BotDifficulty;
+import com.chesslan.game.model.dto.reward.BotMatchResult;
+import com.chesslan.game.model.dto.reward.BotMatchRewardRequestDTO;
 import com.chesslan.game.model.entity.MatchEntity;
 import com.chesslan.game.model.entity.MatchStatus;
 import com.chesslan.game.model.entity.MatchTerminationReason;
@@ -88,9 +91,34 @@ class RewardServiceIntegrationTest {
         assertThat(updatedBlack.getTotalMatches()).isEqualTo(1L);
         assertThat(updatedBlack.getTotalWins()).isEqualTo(1L);
 
-        assertThat(rewardLogRepository.count()).isEqualTo(8L);
+        long matchRewardCount = rewardLogRepository.findAllByUserIdOrderByCreatedAtDesc(white.getId()).size()
+                + rewardLogRepository.findAllByUserIdOrderByCreatedAtDesc(black.getId()).size();
+        assertThat(matchRewardCount).isEqualTo(8L);
         assertThat(rewardService.history("reward_black"))
                 .extracting(reward -> reward.description())
                 .contains("Match Victory EXP", "Match Victory Gold", "Checkmate Bonus", "Long Match Bonus", "Level Up to 2");
+    }
+
+    @Test
+    void botMatchRewardsProgressionWithoutAffectingRankedStats() {
+        authService.signup(new SignupRequestDTO("bot_reward_player", "123456"));
+
+        var reward = rewardService.processBotMatchReward(
+                "bot_reward_player",
+                new BotMatchRewardRequestDTO(BotDifficulty.EXPERT, BotMatchResult.WIN)
+        );
+
+        assertThat(reward.expAwarded()).isEqualTo(250L);
+        assertThat(reward.goldAwarded()).isEqualTo(100L);
+        assertThat(reward.level()).isEqualTo(3);
+
+        var user = userRepository.findByUsernameIgnoreCase("bot_reward_player").orElseThrow();
+        assertThat(user.getElo()).isEqualTo(1200);
+        assertThat(user.getTotalMatches()).isZero();
+        assertThat(user.getTotalWins()).isZero();
+        assertThat(user.getTotalLosses()).isZero();
+        assertThat(rewardService.history("bot_reward_player"))
+                .extracting(item -> item.description())
+                .contains("BOT_EXPERT_WIN", "BOT_LEVEL_UP_2", "BOT_LEVEL_UP_3");
     }
 }
