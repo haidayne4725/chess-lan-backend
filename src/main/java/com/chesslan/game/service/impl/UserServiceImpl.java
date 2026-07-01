@@ -6,6 +6,7 @@ import com.chesslan.game.mapper.GameMapper;
 import com.chesslan.game.model.dto.user.UserCurrencyResponseDTO;
 import com.chesslan.game.model.dto.user.UserProfileResponseDTO;
 import com.chesslan.game.model.dto.user.UserProgressionResponseDTO;
+import com.chesslan.game.model.dto.user.UpdateUserCurrencyRequestDTO;
 import com.chesslan.game.model.entity.UserEntity;
 import com.chesslan.game.repository.LevelRequirementRepository;
 import com.chesslan.game.repository.UserRepository;
@@ -40,6 +41,14 @@ public class UserServiceImpl implements UserService {
     @Transactional(readOnly = true)
     public UserCurrencyResponseDTO currency(String username) {
         return mapper.toUserCurrency(requireUser(username));
+    }
+
+    @Override
+    @Transactional
+    public UserCurrencyResponseDTO updateCurrency(String username, UpdateUserCurrencyRequestDTO request) {
+        UserEntity user = requireUser(username);
+        user.setGold(request.gold());
+        return mapper.toUserCurrency(userRepository.save(user));
     }
 
     private UserEntity requireUser(String username) {

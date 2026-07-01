@@ -5,11 +5,15 @@ import com.chesslan.game.controller.interfaces.UserControllerApi;
 import com.chesslan.game.model.dto.user.UserCurrencyResponseDTO;
 import com.chesslan.game.model.dto.user.UserProfileResponseDTO;
 import com.chesslan.game.model.dto.user.UserProgressionResponseDTO;
+import com.chesslan.game.model.dto.user.UpdateUserCurrencyRequestDTO;
 import com.chesslan.game.service.interfaces.UserService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -44,5 +48,19 @@ public class UserController implements UserControllerApi {
     public ResponseEntity<ApiResponse<UserCurrencyResponseDTO>> currency(Principal principal,
                                                                          HttpServletRequest request) {
         return ResponseFactory.ok(userService.currency(principal.getName()), "Get currency success", request);
+    }
+
+    @Override
+    @PatchMapping("/currency")
+    public ResponseEntity<ApiResponse<UserCurrencyResponseDTO>> updateCurrency(
+            @Valid @RequestBody UpdateUserCurrencyRequestDTO body,
+            Principal principal,
+            HttpServletRequest request
+    ) {
+        return ResponseFactory.ok(
+                userService.updateCurrency(principal.getName(), body),
+                "Update currency success",
+                request
+        );
     }
 }
