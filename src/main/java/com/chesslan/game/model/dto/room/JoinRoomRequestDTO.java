@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Pattern;
 public record JoinRoomRequestDTO(
         @NotBlank
         @Pattern(regexp = "^[A-Za-z0-9]{6}$", message = "Room code must contain 6 letters or numbers")
-        String roomCode
+        String roomCode,
+        @Pattern(regexp = "(?i)^(CLASSIC|ARAM)$", message = "gameMode must be CLASSIC or ARAM")
+        String gameMode
 ) {
 }

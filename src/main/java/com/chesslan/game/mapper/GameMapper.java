@@ -1,5 +1,6 @@
 package com.chesslan.game.mapper;
 
+import com.chesslan.game.infrastructure.aram.AramStateCodec;
 import com.chesslan.game.model.dto.room.RoomResponseDTO;
 import com.chesslan.game.model.dto.match.MatchMoveResponseDTO;
 import com.chesslan.game.model.dto.match.MatchResponseDTO;
@@ -13,11 +14,14 @@ import com.chesslan.game.model.entity.RewardLog;
 import com.chesslan.game.model.entity.RoomEntity;
 import com.chesslan.game.model.entity.UserEntity;
 import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
 
 import java.util.List;
 
 @Component
+@RequiredArgsConstructor
 public class GameMapper {
+    private final AramStateCodec aramStateCodec;
     public UserProfileResponseDTO toUserProfile(UserEntity user, Long nextLevelExp) {
         return new UserProfileResponseDTO(
                 user.getId(),
@@ -65,7 +69,8 @@ public class GameMapper {
                 room.getHost().getUsername(),
                 guest == null ? null : guest.getId(),
                 guest == null ? null : guest.getUsername(),
-                room.getStatus().name()
+                room.getStatus().name(),
+                room.getGameMode().name()
         );
     }
 
@@ -83,6 +88,9 @@ public class GameMapper {
                 match.getStatus().name(),
                 match.getTerminationReason().name(),
                 match.getCurrentFen(),
+                match.getGameMode().name(),
+                match.getAramSeed(),
+                aramStateCodec.decode(match.getAramState()),
                 match.getMoveCount(),
                 match.getWhiteEloBefore(),
                 match.getWhiteEloAfter(),

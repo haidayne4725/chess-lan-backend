@@ -2,6 +2,7 @@ package com.chesslan.game;
 
 import com.chesslan.game.common.exception.ApiException;
 import com.chesslan.game.model.dto.auth.SignupRequestDTO;
+import com.chesslan.game.model.entity.GameMode;
 import com.chesslan.game.model.entity.MatchStatus;
 import com.chesslan.game.repository.MatchRepository;
 import com.chesslan.game.repository.UserRepository;
@@ -13,6 +14,8 @@ import com.chesslan.game.service.interfaces.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -91,5 +94,83 @@ class MatchFlowIntegrationTest {
         assertThat(history).hasSize(1);
         assertThat(history.get(0).moves()).hasSize(4);
         assertThat(history.get(0).moves().get(3).notation()).contains("#");
+    }
+
+    @Test
+    void aramRoomStartsMovesAndSyncsWithAuthoritativeState() {
+        authService.signup(new SignupRequestDTO("aram_white", "123456"));
+        authService.signup(new SignupRequestDTO("aram_black", "123456"));
+
+        var room = roomService.create("aram_white", "ARAM");
+        roomService.join("aram_black", room.roomCode(), "ARAM");
+        var started = matchService.startMatch(room.roomCode(), "ARAM");
+
+        assertThat(started.get("gameMode")).isEqualTo("ARAM");
+        assertThat(started.get("aramSeed")).isNotNull();
+        assertThat(started.get("aramState")).isNotNull();
+
+        var moved = matchService.submitMove(
+                "aram_white", room.roomCode(), "aram-move-1", "e2", "e4", null, "ARAM");
+        assertThat(moved.get("accepted")).isEqualTo(true);
+        assertThat(moved.get("gameMode")).isEqualTo("ARAM");
+        assertThat(moved.get("aramState")).isNotNull();
+
+        var synced = matchService.syncState("aram_black", room.roomCode(), "ARAM");
+        assertThat(synced.get("fen")).isEqualTo(moved.get("fen"));
+        assertThat(synced.get("aramState")).isEqualTo(moved.get("aramState"));
+
+        assertThatThrownBy(() -> matchService.syncState("aram_black", room.roomCode(), null))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("gameMode=ARAM");
+    }
+
+    @Test
+    void modeMismatchFailsClosedWithoutPoisoningRoomOrMatch() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String host = "mode_host_" + suffix;
+        String guest = "mode_guest_" + suffix;
+        authService.signup(new SignupRequestDTO(host, "123456"));
+        authService.signup(new SignupRequestDTO(guest, "123456"));
+
+        var room = roomService.create(host, "ARAM");
+        assertThatThrownBy(() -> roomService.join(guest, room.roomCode(), "CLASSIC"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("mode");
+
+        var joined = roomService.join(guest, room.roomCode(), "ARAM");
+        assertThat(joined.guestUsername()).isEqualTo(guest);
+        assertThatThrownBy(() -> matchService.startMatch(room.roomCode()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("gameMode=ARAM");
+
+        matchService.startMatch(room.roomCode(), "ARAM");
+        assertThatThrownBy(() -> matchService.submitMove(
+                host, room.roomCode(), "wrong-mode-move", "e2", "e4", null, "CLASSIC"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("mode");
+
+        var untouched = matchService.syncState(host, room.roomCode(), "ARAM");
+        assertThat(untouched.get("moveCount")).isEqualTo(0);
+        assertThat(matchRepository.findByRoomRoomCodeIgnoreCase(room.roomCode()).orElseThrow().getGameMode())
+                .isEqualTo(GameMode.ARAM);
+    }
+
+    @Test
+    void classicCompatibilityStillAcceptsLegacyRequestsWithoutMode() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String host = "classic_host_" + suffix;
+        String guest = "classic_guest_" + suffix;
+        authService.signup(new SignupRequestDTO(host, "123456"));
+        authService.signup(new SignupRequestDTO(guest, "123456"));
+
+        String roomCode = roomService.create(host).roomCode();
+        roomService.join(guest, roomCode);
+        var started = matchService.startMatch(roomCode);
+        var moved = matchService.submitMove(host, roomCode, "classic-legacy-1", "e2", "e4", null);
+
+        assertThat(started.get("gameMode")).isEqualTo("CLASSIC");
+        assertThat(started).doesNotContainKeys("aramSeed", "aramState");
+        assertThat(moved.get("gameMode")).isEqualTo("CLASSIC");
+        assertThat(matchService.syncState(guest, roomCode).get("moveCount")).isEqualTo(1);
     }
 }

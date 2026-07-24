@@ -1,5 +1,7 @@
 package com.chesslan.game.model.dto.match;
 
+import com.chesslan.game.infrastructure.aram.AramMatchState;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -16,6 +18,9 @@ public record MatchResponseDTO(
         String status,
         String terminationReason,
         String currentFen,
+        String gameMode,
+        String aramSeed,
+        AramMatchState aramState,
         int moveCount,
         int whiteEloBefore,
         Integer whiteEloAfter,

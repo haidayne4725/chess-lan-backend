@@ -2,6 +2,11 @@ package com.chesslan.game.service.impl;
 
 import com.chesslan.game.common.exception.ApiException;
 import com.chesslan.game.common.exception.ErrorCode;
+import com.chesslan.game.infrastructure.aram.AramMatchState;
+import com.chesslan.game.infrastructure.aram.AramMoveResult;
+import com.chesslan.game.infrastructure.aram.AramRulesEngine;
+import com.chesslan.game.infrastructure.aram.AramStateCodec;
+import com.chesslan.game.infrastructure.aram.AramStateFactory;
 import com.chesslan.game.infrastructure.chess.ChessMoveCommand;
 import com.chesslan.game.infrastructure.chess.ChessMoveRecord;
 import com.chesslan.game.infrastructure.chess.ChessMoveResult;
@@ -9,6 +14,7 @@ import com.chesslan.game.infrastructure.chess.ChessRulesEngine;
 import com.chesslan.game.mapper.GameMapper;
 import com.chesslan.game.model.dto.match.MatchResponseDTO;
 import com.chesslan.game.model.entity.MatchEntity;
+import com.chesslan.game.model.entity.GameMode;
 import com.chesslan.game.model.entity.MatchMoveEntity;
 import com.chesslan.game.model.entity.MatchStatus;
 import com.chesslan.game.model.entity.MatchTerminationReason;
@@ -40,6 +46,9 @@ public class MatchServiceImpl implements MatchService {
     private final RoomRepository roomRepository;
     private final UserRepository userRepository;
     private final ChessRulesEngine chessRulesEngine;
+    private final AramRulesEngine aramRulesEngine;
+    private final AramStateFactory aramStateFactory;
+    private final AramStateCodec aramStateCodec;
     private final EloCalculator eloCalculator;
     private final RewardService rewardService;
     private final GameMapper mapper;
@@ -48,7 +57,14 @@ public class MatchServiceImpl implements MatchService {
     @Override
     @Transactional
     public Map<String, Object> startMatch(String roomCode) {
-        RoomEntity room = requireRoom(roomCode);
+        return startMatch(roomCode, null);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> startMatch(String roomCode, String gameMode) {
+        RoomEntity room = requireRoomForUpdate(roomCode);
+        requireMatchingMode(room.getGameMode(), gameMode);
         if (room.getGuest() == null) {
             throw new ApiException(ErrorCode.ROOM_NOT_JOINABLE, "Two players are required to start");
         }
@@ -64,6 +80,12 @@ public class MatchServiceImpl implements MatchService {
         match.setWhiteEloBefore(room.getHost().getElo());
         match.setBlackEloBefore(room.getGuest().getElo());
         match.setCurrentFen(chessRulesEngine.initialFen());
+        match.setGameMode(room.getGameMode());
+        if (match.getGameMode() == GameMode.ARAM) {
+            String seed = UUID.randomUUID().toString();
+            match.setAramSeed(seed);
+            match.setAramState(aramStateCodec.encode(aramStateFactory.create(seed)));
+        }
         match.setMoveCount(0);
         match.setStartedAt(LocalDateTime.now());
         match.setStatus(MatchStatus.ACTIVE);
@@ -81,10 +103,23 @@ public class MatchServiceImpl implements MatchService {
                                           String from,
                                           String to,
                                           String promotion) {
+        return submitMove(username, roomCode, requestId, from, to, promotion, null);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> submitMove(String username,
+                                          String roomCode,
+                                          String requestId,
+                                          String from,
+                                          String to,
+                                          String promotion,
+                                          String gameMode) {
         if (requestId == null || requestId.isBlank()) {
             throw new ApiException(ErrorCode.INVALID_REQUEST, "requestId is required");
         }
-        MatchEntity match = requireActiveMatch(roomCode);
+        MatchEntity match = requireActiveMatchForUpdate(roomCode);
+        requireMatchingMode(match.getGameMode(), gameMode);
         UserEntity player = requireParticipant(match, username);
 
         var duplicate = matchMoveRepository.findByMatchIdAndRequestId(match.getId(), requestId);
@@ -98,13 +133,7 @@ public class MatchServiceImpl implements MatchService {
         }
 
         List<MatchMoveEntity> previous = matchMoveRepository.findAllByMatchIdOrderByMoveNumberAsc(match.getId());
-        List<ChessMoveRecord> replay = previous.stream()
-                .map(move -> new ChessMoveRecord(move.getFromSquare(), move.getToSquare(), move.getPromotion()))
-                .toList();
-        ChessMoveResult result = chessRulesEngine.applyMove(replay, new ChessMoveCommand(from, to, promotion));
-        if (!result.accepted()) {
-            throw new ApiException(ErrorCode.ILLEGAL_MOVE, result.message());
-        }
+        MoveOutcome result = applyMove(match, previous, new ChessMoveCommand(from, to, promotion));
 
         MatchMoveEntity move = new MatchMoveEntity();
         move.setMatch(match);
@@ -120,6 +149,9 @@ public class MatchServiceImpl implements MatchService {
 
         match.setMoveCount(move.getMoveNumber());
         match.setCurrentFen(result.fen());
+        if (match.getGameMode() == GameMode.ARAM) {
+            match.setAramState(aramStateCodec.encode(result.aramState()));
+        }
         if (result.checkmate()) {
             finish(match, player, player.getId().equals(match.getWhitePlayer().getId())
                     ? MatchStatus.WHITE_WON
@@ -175,7 +207,14 @@ public class MatchServiceImpl implements MatchService {
     @Override
     @Transactional(readOnly = true)
     public Map<String, Object> syncState(String username, String roomCode) {
+        return syncState(username, roomCode, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, Object> syncState(String username, String roomCode, String gameMode) {
         MatchEntity match = requireMatch(roomCode);
+        requireMatchingMode(match.getGameMode(), gameMode);
         requireParticipant(match, username);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("matchId", match.getId().toString());
@@ -185,6 +224,7 @@ public class MatchServiceImpl implements MatchService {
         payload.put("moveCount", match.getMoveCount());
         payload.put("whitePlayerId", match.getWhitePlayer().getId().toString());
         payload.put("blackPlayerId", match.getBlackPlayer().getId().toString());
+        addModeState(payload, match);
         if (match.getStatus() != MatchStatus.ACTIVE) {
             payload.putAll(gameOverPayload(match));
         }
@@ -264,12 +304,14 @@ public class MatchServiceImpl implements MatchService {
         payload.put("blackUsername", match.getBlackPlayer().getUsername());
         payload.put("fen", match.getCurrentFen());
         payload.put("turn", sideToMove(match.getCurrentFen()));
+        addModeState(payload, match);
         return payload;
     }
 
     private Map<String, Object> acceptedMovePayload(MatchEntity match,
                                                     MatchMoveEntity move,
                                                     boolean newlyProcessed) {
+        String authoritativeFen = newlyProcessed ? move.getFenAfter() : match.getCurrentFen();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("accepted", true);
         payload.put("newlyProcessed", newlyProcessed);
@@ -279,10 +321,11 @@ public class MatchServiceImpl implements MatchService {
         payload.put("to", move.getToSquare());
         payload.put("promotion", move.getPromotion());
         payload.put("notation", move.getNotation());
-        payload.put("fen", move.getFenAfter());
-        payload.put("turn", sideToMove(move.getFenAfter()));
+        payload.put("fen", authoritativeFen);
+        payload.put("turn", sideToMove(authoritativeFen));
         payload.put("check", move.getNotation().contains("+") || move.getNotation().contains("#"));
         payload.put("status", match.getStatus().name());
+        addModeState(payload, match);
         if (match.getStatus() != MatchStatus.ACTIVE) {
             payload.put("gameOver", gameOverPayload(match));
         }
@@ -310,6 +353,15 @@ public class MatchServiceImpl implements MatchService {
         return match;
     }
 
+    private MatchEntity requireActiveMatchForUpdate(String roomCode) {
+        MatchEntity match = matchRepository.findByRoomCodeForUpdate(roomCode)
+                .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Match not found"));
+        if (match.getStatus() != MatchStatus.ACTIVE) {
+            throw new ApiException(ErrorCode.MATCH_NOT_ACTIVE);
+        }
+        return match;
+    }
+
     private MatchEntity requireMatch(String roomCode) {
         return matchRepository.findByRoomRoomCodeIgnoreCase(roomCode)
                 .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Match not found"));
@@ -317,6 +369,11 @@ public class MatchServiceImpl implements MatchService {
 
     private RoomEntity requireRoom(String roomCode) {
         return roomRepository.findByRoomCodeIgnoreCase(roomCode)
+                .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Room not found"));
+    }
+
+    private RoomEntity requireRoomForUpdate(String roomCode) {
+        return roomRepository.findByRoomCodeForUpdate(roomCode)
                 .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Room not found"));
     }
 
@@ -341,5 +398,69 @@ public class MatchServiceImpl implements MatchService {
 
     private String normalizeNullable(String value) {
         return value == null || value.isBlank() ? null : value.trim().toUpperCase();
+    }
+
+    private MoveOutcome applyMove(MatchEntity match,
+                                  List<MatchMoveEntity> previous,
+                                  ChessMoveCommand command) {
+        if (match.getGameMode() == GameMode.ARAM) {
+            AramMoveResult result = aramRulesEngine.applyMove(
+                    match.getCurrentFen(),
+                    aramStateCodec.decode(match.getAramState()),
+                    previous.stream().map(MatchMoveEntity::getFenAfter).toList(),
+                    command
+            );
+            if (!result.accepted()) {
+                throw new ApiException(ErrorCode.ILLEGAL_MOVE, result.message());
+            }
+            return new MoveOutcome(result.notation(), result.fen(), result.checkmate(), result.draw(),
+                    result.drawReason(), result.aramState());
+        }
+
+        List<ChessMoveRecord> replay = previous.stream()
+                .map(move -> new ChessMoveRecord(move.getFromSquare(), move.getToSquare(), move.getPromotion()))
+                .toList();
+        ChessMoveResult result = chessRulesEngine.applyMove(replay, command);
+        if (!result.accepted()) {
+            throw new ApiException(ErrorCode.ILLEGAL_MOVE, result.message());
+        }
+        return new MoveOutcome(result.notation(), result.fen(), result.checkmate(), result.draw(),
+                result.drawReason(), null);
+    }
+
+    private void addModeState(Map<String, Object> payload, MatchEntity match) {
+        payload.put("gameMode", match.getGameMode().name());
+        if (match.getGameMode() == GameMode.ARAM) {
+            payload.put("aramSeed", match.getAramSeed());
+            payload.put("aramState", aramStateCodec.decode(match.getAramState()));
+        }
+    }
+
+    private void requireMatchingMode(GameMode actual, String requested) {
+        if (requested == null || requested.isBlank()) {
+            if (actual == GameMode.ARAM) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST, "ARAM match requires gameMode=ARAM");
+            }
+            return;
+        }
+        GameMode parsed;
+        try {
+            parsed = GameMode.fromNullable(requested);
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST, "gameMode must be CLASSIC or ARAM");
+        }
+        if (parsed != actual) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST, "Match game mode does not match the request");
+        }
+    }
+
+    private record MoveOutcome(
+            String notation,
+            String fen,
+            boolean checkmate,
+            boolean draw,
+            String drawReason,
+            AramMatchState aramState
+    ) {
     }
 }

@@ -31,4 +31,8 @@ public class RoomEntity extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private RoomStatus status = RoomStatus.WAITING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private GameMode gameMode = GameMode.CLASSIC;
 }

@@ -5,6 +5,7 @@ import com.chesslan.game.common.exception.ErrorCode;
 import com.chesslan.game.mapper.GameMapper;
 import com.chesslan.game.model.dto.room.RoomResponseDTO;
 import com.chesslan.game.model.entity.RoomEntity;
+import com.chesslan.game.model.entity.GameMode;
 import com.chesslan.game.model.entity.RoomStatus;
 import com.chesslan.game.model.entity.UserEntity;
 import com.chesslan.game.repository.RoomRepository;
@@ -29,17 +30,30 @@ public class RoomServiceImpl implements RoomService {
     @Override
     @Transactional
     public RoomResponseDTO create(String username) {
+        return create(username, null);
+    }
+
+    @Override
+    @Transactional
+    public RoomResponseDTO create(String username, String gameMode) {
         UserEntity host = requireUser(username);
         RoomEntity room = new RoomEntity();
         room.setRoomCode(generateCode());
         room.setHost(host);
         room.setStatus(RoomStatus.WAITING);
+        room.setGameMode(parseGameMode(gameMode));
         return mapper.toRoom(roomRepository.save(room));
     }
 
     @Override
     @Transactional
     public RoomResponseDTO join(String username, String roomCode) {
+        return join(username, roomCode, null);
+    }
+
+    @Override
+    @Transactional
+    public RoomResponseDTO join(String username, String roomCode, String gameMode) {
         UserEntity guest = requireUser(username);
         RoomEntity room = roomRepository.findByRoomCodeIgnoreCase(roomCode.trim())
                 .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Room not found"));
@@ -49,6 +63,7 @@ public class RoomServiceImpl implements RoomService {
         if (room.getHost().getId().equals(guest.getId())) {
             throw new ApiException(ErrorCode.ROOM_NOT_JOINABLE, "Host cannot join the same room as guest");
         }
+        requireMatchingMode(room, gameMode);
         room.setGuest(guest);
         room.setStatus(RoomStatus.PLAYING);
         return mapper.toRoom(roomRepository.save(room));
@@ -60,6 +75,34 @@ public class RoomServiceImpl implements RoomService {
         return roomRepository.findByRoomCodeIgnoreCase(roomCode)
                 .map(mapper::toRoom)
                 .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Room not found"));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void validateGameMode(String roomCode, String requestedGameMode) {
+        RoomEntity room = roomRepository.findByRoomCodeIgnoreCase(roomCode)
+                .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Room not found"));
+        requireMatchingMode(room, requestedGameMode);
+    }
+
+    private GameMode parseGameMode(String value) {
+        try {
+            return GameMode.fromNullable(value);
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST, "gameMode must be CLASSIC or ARAM");
+        }
+    }
+
+    private void requireMatchingMode(RoomEntity room, String requestedGameMode) {
+        if (requestedGameMode == null || requestedGameMode.isBlank()) {
+            if (room.getGameMode() == GameMode.ARAM) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST, "ARAM room requires gameMode=ARAM");
+            }
+            return;
+        }
+        if (parseGameMode(requestedGameMode) != room.getGameMode()) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST, "Room game mode does not match the request");
+        }
     }
 
     private UserEntity requireUser(String username) {

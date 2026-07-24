@@ -16,7 +16,7 @@ public enum ErrorCode {
     FORBIDDEN(4006, "You cannot perform this action", HttpStatus.FORBIDDEN),
     MATCH_NOT_ACTIVE(4007, "Match is not active", HttpStatus.CONFLICT),
     NOT_YOUR_TURN(4008, "It is not your turn", HttpStatus.CONFLICT),
-    ILLEGAL_MOVE(4009, "Move is not legal", HttpStatus.UNPROCESSABLE_ENTITY),
+    ILLEGAL_MOVE(4009, "Move is not legal", HttpStatus.UNPROCESSABLE_CONTENT),
     MATCH_ALREADY_STARTED(4010, "Match has already started", HttpStatus.CONFLICT),
     INTERNAL_ERROR(5000, "Internal server error", HttpStatus.INTERNAL_SERVER_ERROR);
 

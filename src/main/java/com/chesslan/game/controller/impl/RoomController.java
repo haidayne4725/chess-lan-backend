@@ -3,6 +3,7 @@ package com.chesslan.game.controller.impl;
 import com.chesslan.game.common.response.ApiResponse;
 import com.chesslan.game.controller.interfaces.RoomControllerApi;
 import com.chesslan.game.model.dto.room.JoinRoomRequestDTO;
+import com.chesslan.game.model.dto.room.CreateRoomRequestDTO;
 import com.chesslan.game.model.dto.room.RoomResponseDTO;
 import com.chesslan.game.service.interfaces.RoomService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,9 +27,14 @@ public class RoomController implements RoomControllerApi {
 
     @Override
     @PostMapping("/create")
-    public ResponseEntity<ApiResponse<RoomResponseDTO>> create(Principal principal,
+    public ResponseEntity<ApiResponse<RoomResponseDTO>> create(@Valid @RequestBody(required = false) CreateRoomRequestDTO body,
+                                                               Principal principal,
                                                                HttpServletRequest request) {
-        return ResponseFactory.ok(roomService.create(principal.getName()), "Create room success", request);
+        return ResponseFactory.ok(
+                roomService.create(principal.getName(), body == null ? null : body.gameMode()),
+                "Create room success",
+                request
+        );
     }
 
     @Override
@@ -37,7 +43,7 @@ public class RoomController implements RoomControllerApi {
                                                              Principal principal,
                                                              HttpServletRequest request) {
         return ResponseFactory.ok(
-                roomService.join(principal.getName(), body.roomCode()),
+                roomService.join(principal.getName(), body.roomCode(), body.gameMode()),
                 "Join room success",
                 request
         );

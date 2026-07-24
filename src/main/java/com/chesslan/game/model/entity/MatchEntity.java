@@ -48,6 +48,16 @@ public class MatchEntity extends BaseEntity {
     @Column(nullable = false, columnDefinition = "text")
     private String currentFen;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private GameMode gameMode = GameMode.CLASSIC;
+
+    @Column(length = 80)
+    private String aramSeed;
+
+    @Column(columnDefinition = "text")
+    private String aramState;
+
     @Column(nullable = false)
     private Integer moveCount = 0;
 

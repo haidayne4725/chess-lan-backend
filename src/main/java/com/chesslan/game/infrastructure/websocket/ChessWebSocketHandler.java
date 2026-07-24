@@ -1,7 +1,9 @@
 package com.chesslan.game.infrastructure.websocket;
 
 import com.chesslan.game.common.exception.ApiException;
+import com.chesslan.game.common.exception.ErrorCode;
 import com.chesslan.game.service.interfaces.MatchService;
+import com.chesslan.game.service.interfaces.RoomService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -22,11 +24,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class ChessWebSocketHandler extends TextWebSocketHandler {
     private static final Set<String> SUPPORTED_EVENTS = Set.of(
-            "READY", "MOVE", "RESIGN", "DRAW_OFFER", "DRAW_ACCEPT", "SYNC_REQUEST"
+            "READY", "START", "MOVE", "RESIGN", "DRAW_OFFER", "DRAW_ACCEPT", "SYNC_REQUEST"
     );
 
     private final JsonMapper objectMapper;
     private final MatchService matchService;
+    private final RoomService roomService;
     private final ConcurrentHashMap<String, Set<WebSocketSession>> roomSessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Set<String>> readyPlayers = new ConcurrentHashMap<>();
     private final Set<String> startedRooms = ConcurrentHashMap.newKeySet();
@@ -42,10 +45,11 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+        String requestId = null;
         try {
             JsonNode incoming = objectMapper.readTree(message.getPayload());
-            String type = incoming.path("type").asText("").toUpperCase();
-            String requestId = incoming.path("requestId").asText(UUID.randomUUID().toString());
+            String type = incoming.path("type").stringValue("").toUpperCase();
+            requestId = incoming.path("requestId").stringValue(UUID.randomUUID().toString());
             JsonNode payload = incoming.has("payload") ? incoming.path("payload") : incoming;
 
             if (!SUPPORTED_EVENTS.contains(type)) {
@@ -54,7 +58,8 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
             }
 
             switch (type) {
-                case "READY" -> handleReady(session, requestId);
+                case "READY" -> handleReady(session, requestId, payload);
+                case "START" -> handleStart(session, requestId, payload);
                 case "MOVE" -> handleMove(session, requestId, payload);
                 case "RESIGN" -> broadcastEvent(roomCode(session), "GAME_OVER", requestId,
                         matchService.resign(username(session), roomCode(session)));
@@ -63,13 +68,13 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
                 case "DRAW_ACCEPT" -> broadcastEvent(roomCode(session), "GAME_OVER", requestId,
                         matchService.acceptDraw(username(session), roomCode(session)));
                 case "SYNC_REQUEST" -> sendEvent(session, "GAME_STATE", requestId,
-                        matchService.syncState(username(session), roomCode(session)));
+                        matchService.syncState(username(session), roomCode(session), gameMode(payload)));
                 default -> sendError(session, requestId, "UNSUPPORTED_EVENT", "Unsupported message type");
             }
         } catch (ApiException exception) {
-            sendError(session, null, exception.getErrorCode().name(), exception.getMessage());
+            sendError(session, requestId, exception.getErrorCode().name(), exception.getMessage());
         } catch (Exception exception) {
-            sendError(session, null, "INVALID_MESSAGE", "Message must be valid JSON");
+            sendError(session, requestId, "INVALID_MESSAGE", "Message must be valid JSON");
         }
     }
 
@@ -90,7 +95,8 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
         ));
     }
 
-    private void handleReady(WebSocketSession session, String requestId) {
+    private void handleReady(WebSocketSession session, String requestId, JsonNode payload) {
+        roomService.validateGameMode(roomCode(session), gameMode(payload));
         Set<String> ready = readyPlayers.computeIfAbsent(
                 roomCode(session),
                 ignored -> ConcurrentHashMap.newKeySet()
@@ -103,7 +109,7 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
         ));
         if (ready.size() >= 2 && startedRooms.add(roomCode(session))) {
             try {
-                Map<String, Object> game = matchService.startMatch(roomCode(session));
+                Map<String, Object> game = matchService.startMatch(roomCode(session), gameMode(payload));
                 broadcastEvent(roomCode(session), "GAME_START", requestId, game);
             } catch (RuntimeException exception) {
                 startedRooms.remove(roomCode(session));
@@ -112,14 +118,27 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    private void handleStart(WebSocketSession session, String requestId, JsonNode payload) {
+        roomService.validateGameMode(roomCode(session), gameMode(payload));
+        Set<String> ready = readyPlayers.getOrDefault(roomCode(session), Set.of());
+        if (ready.size() < 2) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST,
+                    "Both players must be ready before starting");
+        }
+        Map<String, Object> game = matchService.startMatch(roomCode(session), gameMode(payload));
+        startedRooms.add(roomCode(session));
+        broadcastEvent(roomCode(session), "GAME_START", requestId, game);
+    }
+
     private void handleMove(WebSocketSession session, String requestId, JsonNode payload) {
         Map<String, Object> result = matchService.submitMove(
                 username(session),
                 roomCode(session),
                 requestId,
-                payload.path("from").asText(null),
-                payload.path("to").asText(null),
-                payload.path("promotion").asText(null)
+                payload.path("from").stringValue(null),
+                payload.path("to").stringValue(null),
+                payload.path("promotion").stringValue(null),
+                gameMode(payload)
         );
         broadcastEvent(roomCode(session), "MOVE_RESULT", requestId, result);
         if (!"ACTIVE".equals(result.get("status"))) {
@@ -184,5 +203,9 @@ public class ChessWebSocketHandler extends TextWebSocketHandler {
 
     private String userId(WebSocketSession session) {
         return String.valueOf(session.getAttributes().get("userId"));
+    }
+
+    private String gameMode(JsonNode payload) {
+        return payload == null ? null : payload.path("gameMode").stringValue(null);
     }
 }

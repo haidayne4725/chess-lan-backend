@@ -9,6 +9,7 @@ public record RoomResponseDTO(
         String hostUsername,
         UUID guestId,
         String guestUsername,
-        String status
+        String status,
+        String gameMode
 ) {
 }
