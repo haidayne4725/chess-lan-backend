@@ -28,6 +28,7 @@ public record MatchResponseDTO(
         Integer blackEloAfter,
         LocalDateTime startedAt,
         LocalDateTime finishedAt,
-        List<MatchMoveResponseDTO> moves
+        List<MatchMoveResponseDTO> moves,
+        MatchStatisticsDTO statistics
 ) {
 }

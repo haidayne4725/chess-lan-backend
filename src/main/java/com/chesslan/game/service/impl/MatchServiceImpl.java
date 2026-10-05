@@ -52,6 +52,7 @@ public class MatchServiceImpl implements MatchService {
     private final EloCalculator eloCalculator;
     private final RewardService rewardService;
     private final GameMapper mapper;
+    private final MatchStatisticsProjector statisticsProjector;
     private final ConcurrentHashMap<String, String> drawOffers = new ConcurrentHashMap<>();
 
     @Override
@@ -334,6 +335,8 @@ public class MatchServiceImpl implements MatchService {
 
     private Map<String, Object> gameOverPayload(MatchEntity match) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("statistics", statisticsProjector.project(match,
+                matchMoveRepository.findAllByMatchIdOrderByMoveNumberAsc(match.getId())));
         payload.put("matchId", match.getId().toString());
         payload.put("result", match.getStatus().name());
         payload.put("reason", match.getTerminationReason().name());
@@ -429,6 +432,8 @@ public class MatchServiceImpl implements MatchService {
     }
 
     private void addModeState(Map<String, Object> payload, MatchEntity match) {
+        payload.put("statistics", statisticsProjector.project(match,
+                matchMoveRepository.findAllByMatchIdOrderByMoveNumberAsc(match.getId())));
         payload.put("gameMode", match.getGameMode().name());
         if (match.getGameMode() == GameMode.ARAM) {
             payload.put("aramSeed", match.getAramSeed());

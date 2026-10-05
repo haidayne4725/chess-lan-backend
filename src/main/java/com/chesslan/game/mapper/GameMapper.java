@@ -22,6 +22,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class GameMapper {
     private final AramStateCodec aramStateCodec;
+    private final com.chesslan.game.service.impl.MatchStatisticsProjector statisticsProjector;
     public UserProfileResponseDTO toUserProfile(UserEntity user, Long nextLevelExp) {
         return new UserProfileResponseDTO(
                 user.getId(),
@@ -98,7 +99,8 @@ public class GameMapper {
                 match.getBlackEloAfter(),
                 match.getStartedAt(),
                 match.getFinishedAt(),
-                moves.stream().map(this::toMove).toList()
+                moves.stream().map(this::toMove).toList(),
+                statisticsProjector.project(match, moves)
         );
     }
 
