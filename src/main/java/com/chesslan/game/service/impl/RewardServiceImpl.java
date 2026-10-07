@@ -11,7 +11,6 @@ import com.chesslan.game.model.dto.reward.BotMatchRewardResponseDTO;
 import com.chesslan.game.model.entity.LevelRequirement;
 import com.chesslan.game.model.entity.MatchEntity;
 import com.chesslan.game.model.entity.MatchStatus;
-import com.chesslan.game.model.entity.MatchTerminationReason;
 import com.chesslan.game.model.entity.RewardLog;
 import com.chesslan.game.model.entity.RewardType;
 import com.chesslan.game.model.entity.UserEntity;
@@ -30,18 +29,13 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class RewardServiceImpl implements RewardService {
-    private static final long WIN_EXP = 100L;
-    private static final long DRAW_EXP = 50L;
-    private static final long LOSS_EXP = 30L;
-    private static final long WIN_GOLD = 150L;
-    private static final long DRAW_GOLD = 80L;
-    private static final long LOSS_GOLD = 50L;
-    private static final long CHECKMATE_BONUS_EXP = 20L;
-    private static final long LONG_MATCH_BONUS_EXP = 10L;
     private static final long MAX_BOT_EXP_PER_DAY = 3000L;
     private static final long MAX_BOT_GOLD_PER_DAY = 1500L;
 
     private final UserRepository userRepository;
+    private final com.chesslan.game.repository.MatchRepository matchRepository;
+    private final com.chesslan.game.repository.MatchMoveRepository matchMoveRepository;
+    private final jakarta.persistence.EntityManager entityManager;
     private final LevelRequirementRepository levelRequirementRepository;
     private final RewardLogRepository rewardLogRepository;
     private final GameMapper mapper;
@@ -90,39 +84,24 @@ public class RewardServiceImpl implements RewardService {
     @Override
     @Transactional
     public void processMatchReward(MatchEntity match) {
-        if (rewardLogRepository.existsByMatchId(match.getId())) {
-            return;
-        }
-
-        UserEntity whitePlayer = match.getWhitePlayer();
-        UserEntity blackPlayer = match.getBlackPlayer();
-        MatchStatus status = match.getStatus();
-
-        incrementMatchTotals(whitePlayer, blackPlayer, status);
-
-        if (status == MatchStatus.DRAW) {
-            rewardMatchResult(whitePlayer, match, DRAW_EXP, DRAW_GOLD, "Match Draw");
-            rewardMatchResult(blackPlayer, match, DRAW_EXP, DRAW_GOLD, "Match Draw");
-        } else {
-            UserEntity winner = requireWinner(match);
-            UserEntity loser = winner.getId().equals(whitePlayer.getId()) ? blackPlayer : whitePlayer;
-            rewardMatchResult(winner, match, WIN_EXP, WIN_GOLD, "Match Victory");
-            rewardMatchResult(loser, match, LOSS_EXP, LOSS_GOLD, "Match Defeat");
-            if (match.getTerminationReason() == MatchTerminationReason.CHECKMATE) {
-                grantExp(winner, match, CHECKMATE_BONUS_EXP, "Checkmate Bonus");
-            }
-        }
-
-        if (match.getMoveCount() > 30) {
-            grantExp(whitePlayer, match, LONG_MATCH_BONUS_EXP, "Long Match Bonus");
-            grantExp(blackPlayer, match, LONG_MATCH_BONUS_EXP, "Long Match Bonus");
-        }
-
-        processLevelUp(whitePlayer, match);
-        processLevelUp(blackPlayer, match);
-
-        userRepository.save(whitePlayer);
-        userRepository.save(blackPlayer);
+        MatchEntity persisted = matchRepository.findByIdForUpdate(match.getId())
+                .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Match not found"));
+        if (persisted.getStatus() == MatchStatus.ACTIVE || persisted.isStatisticsProcessed()) return;
+        // Refresh under locks in stable ID order to avoid stale totals and cross-match lost updates.
+        var players = new java.util.ArrayList<>(List.of(persisted.getWhitePlayer(), persisted.getBlackPlayer()));
+        players.sort(java.util.Comparator.comparing(p -> p.getId().toString()));
+        for (var player : players) entityManager.refresh(player, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        boolean played = matchMoveRepository.existsByMatchIdAndPlayerId(persisted.getId(), persisted.getWhitePlayer().getId())
+                && matchMoveRepository.existsByMatchIdAndPlayerId(persisted.getId(), persisted.getBlackPlayer().getId());
+        persisted.setStatsApplied(played);
+        if (played) incrementMatchTotals(persisted.getWhitePlayer(), persisted.getBlackPlayer(), persisted.getStatus());
+        persisted.setStatisticsProcessed(true);
+        persisted.setRated(false);
+        persisted.setSettlementDecision(played ? "UNRATED_LAN_ROOM" : "NOT_PLAYED");
+        // No Elo, gold, EXP, bonuses or level changes can be minted by invite rooms.
+        userRepository.save(persisted.getWhitePlayer());
+        userRepository.save(persisted.getBlackPlayer());
+        matchRepository.save(persisted);
     }
 
     @Override
@@ -170,11 +149,6 @@ public class RewardServiceImpl implements RewardService {
         );
     }
 
-    private void rewardMatchResult(UserEntity user, MatchEntity match, long expAmount, long goldAmount, String description) {
-        grantExp(user, match, expAmount, description + " EXP");
-        grantGold(user, match, goldAmount, description + " Gold");
-    }
-
     private void incrementMatchTotals(UserEntity whitePlayer, UserEntity blackPlayer, MatchStatus status) {
         whitePlayer.setTotalMatches(whitePlayer.getTotalMatches() + 1);
         blackPlayer.setTotalMatches(blackPlayer.getTotalMatches() + 1);
@@ -195,13 +169,6 @@ public class RewardServiceImpl implements RewardService {
             blackPlayer.setTotalWins(blackPlayer.getTotalWins() + 1);
             whitePlayer.setTotalLosses(whitePlayer.getTotalLosses() + 1);
         }
-    }
-
-    private UserEntity requireWinner(MatchEntity match) {
-        if (match.getWinner() == null) {
-            throw new ApiException(ErrorCode.INVALID_REQUEST, "Winner is required for decisive reward processing");
-        }
-        return match.getWinner();
     }
 
     private RewardLog rewardLog(UserEntity user, MatchEntity match, RewardType rewardType, long amount, String description) {

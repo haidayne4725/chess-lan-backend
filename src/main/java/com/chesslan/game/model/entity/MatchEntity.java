@@ -15,6 +15,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -61,6 +62,10 @@ public class MatchEntity extends BaseEntity {
     @Column(nullable = false)
     private Integer moveCount = 0;
 
+    // Pending draw offer belongs to the match transaction, including rollback and restart.
+    @Column(name = "draw_offer_player_id")
+    private UUID drawOfferPlayerId;
+
     @Column(nullable = false)
     private Integer whiteEloBefore;
 
@@ -75,6 +80,19 @@ public class MatchEntity extends BaseEntity {
     private LocalDateTime startedAt;
 
     private LocalDateTime finishedAt;
+
+    // LAN invite rooms are always unrated. This flag is set by the server, never a request DTO.
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean rated;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean statisticsProcessed;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean statsApplied;
+
+    @Column(nullable = false, columnDefinition = "varchar(40) default 'LEGACY'")
+    private String settlementDecision = "LEGACY";
 
     @Version
     private Long version;

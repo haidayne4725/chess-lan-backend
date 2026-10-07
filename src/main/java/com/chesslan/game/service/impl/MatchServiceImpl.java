@@ -36,7 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -49,11 +49,9 @@ public class MatchServiceImpl implements MatchService {
     private final AramRulesEngine aramRulesEngine;
     private final AramStateFactory aramStateFactory;
     private final AramStateCodec aramStateCodec;
-    private final EloCalculator eloCalculator;
     private final RewardService rewardService;
     private final GameMapper mapper;
     private final MatchStatisticsProjector statisticsProjector;
-    private final ConcurrentHashMap<String, String> drawOffers = new ConcurrentHashMap<>();
 
     @Override
     @Transactional
@@ -76,10 +74,11 @@ public class MatchServiceImpl implements MatchService {
 
         MatchEntity match = new MatchEntity();
         match.setRoom(room);
+        match.setRated(false);
         match.setWhitePlayer(room.getHost());
         match.setBlackPlayer(room.getGuest());
-        match.setWhiteEloBefore(room.getHost().getElo());
-        match.setBlackEloBefore(room.getGuest().getElo());
+        match.setWhiteEloBefore(room.getHost().ratingFor(room.getGameMode()));
+        match.setBlackEloBefore(room.getGuest().ratingFor(room.getGameMode()));
         match.setCurrentFen(chessRulesEngine.initialFen());
         match.setGameMode(room.getGameMode());
         if (match.getGameMode() == GameMode.ARAM) {
@@ -119,13 +118,24 @@ public class MatchServiceImpl implements MatchService {
         if (requestId == null || requestId.isBlank()) {
             throw new ApiException(ErrorCode.INVALID_REQUEST, "requestId is required");
         }
-        MatchEntity match = requireActiveMatchForUpdate(roomCode);
+        MatchEntity match = requireMatchForUpdate(roomCode);
         requireMatchingMode(match.getGameMode(), gameMode);
         UserEntity player = requireParticipant(match, username);
 
         var duplicate = matchMoveRepository.findByMatchIdAndRequestId(match.getId(), requestId);
         if (duplicate.isPresent()) {
-            return acceptedMovePayload(match, duplicate.get(), false);
+            var original = duplicate.get();
+            if (!original.getPlayer().getId().equals(player.getId()) || from == null || to == null ||
+                    !original.getFromSquare().equalsIgnoreCase(from) || !original.getToSquare().equalsIgnoreCase(to) ||
+                    !Objects.equals(original.getPromotion(), normalizeNullable(promotion))) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST, "requestId was already used for a different move or player");
+            }
+            return acceptedMovePayload(match, original, false);
+        }
+
+        // A persisted move can be retried after game-over; a new move cannot.
+        if (match.getStatus() != MatchStatus.ACTIVE) {
+            throw new ApiException(ErrorCode.MATCH_NOT_ACTIVE);
         }
 
         boolean whiteTurn = sideToMove(match.getCurrentFen()).equals("WHITE");
@@ -148,6 +158,9 @@ public class MatchServiceImpl implements MatchService {
         move.setFenAfter(result.fen());
         matchMoveRepository.save(move);
 
+        // The opponent declines a draw offer by making a move. The offerer's own move does not withdraw it.
+        if (match.getDrawOfferPlayerId() != null && !match.getDrawOfferPlayerId().equals(player.getId()))
+            match.setDrawOfferPlayerId(null);
         match.setMoveCount(move.getMoveNumber());
         match.setCurrentFen(result.fen());
         if (match.getGameMode() == GameMode.ARAM) {
@@ -171,7 +184,7 @@ public class MatchServiceImpl implements MatchService {
     @Override
     @Transactional
     public Map<String, Object> resign(String username, String roomCode) {
-        MatchEntity match = requireActiveMatch(roomCode);
+        MatchEntity match = requireActiveMatchForUpdate(roomCode);
         UserEntity resigning = requireParticipant(match, username);
         UserEntity winner = resigning.getId().equals(match.getWhitePlayer().getId())
                 ? match.getBlackPlayer()
@@ -184,23 +197,25 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
+    @Transactional
     public Map<String, Object> offerDraw(String username, String roomCode) {
-        MatchEntity match = requireActiveMatch(roomCode);
-        requireParticipant(match, username);
-        drawOffers.put(roomCode.toUpperCase(), username);
+        MatchEntity match = requireActiveMatchForUpdate(roomCode);
+        UserEntity actor = requireParticipant(match, username);
+        match.setDrawOfferPlayerId(actor.getId());
+        matchRepository.save(match);
         return Map.of("offeredBy", username);
     }
 
     @Override
     @Transactional
     public Map<String, Object> acceptDraw(String username, String roomCode) {
-        MatchEntity match = requireActiveMatch(roomCode);
-        requireParticipant(match, username);
-        String offeredBy = drawOffers.get(roomCode.toUpperCase());
-        if (offeredBy == null || offeredBy.equalsIgnoreCase(username)) {
+        MatchEntity match = requireActiveMatchForUpdate(roomCode);
+        UserEntity actor = requireParticipant(match, username);
+        UUID offeredBy = match.getDrawOfferPlayerId();
+        if (offeredBy == null || offeredBy.equals(actor.getId())) {
             throw new ApiException(ErrorCode.INVALID_REQUEST, "No opponent draw offer is pending");
         }
-        drawOffers.remove(roomCode.toUpperCase());
+        match.setDrawOfferPlayerId(null);
         finish(match, null, MatchStatus.DRAW, MatchTerminationReason.DRAW_AGREEMENT);
         return gameOverPayload(match);
     }
@@ -271,18 +286,11 @@ public class MatchServiceImpl implements MatchService {
         if (match.getStatus() != MatchStatus.ACTIVE) {
             return;
         }
-        double whiteScore = status == MatchStatus.DRAW
-                ? 0.5
-                : winner != null && winner.getId().equals(match.getWhitePlayer().getId()) ? 1.0 : 0.0;
-        EloCalculator.RatingChange rating = eloCalculator.calculate(
-                match.getWhitePlayer().getElo(),
-                match.getBlackPlayer().getElo(),
-                whiteScore
-        );
-        match.getWhitePlayer().setElo(rating.whiteRating());
-        match.getBlackPlayer().setElo(rating.blackRating());
-        match.setWhiteEloAfter(rating.whiteRating());
-        match.setBlackEloAfter(rating.blackRating());
+        // A chosen opponent in a LAN room is not an authoritative ranked pairing.
+        match.setRated(false);
+        match.setWhiteEloAfter(match.getWhiteEloBefore());
+        match.setBlackEloAfter(match.getBlackEloBefore());
+        match.setSettlementDecision("UNRATED_LAN_ROOM");
         match.setWinner(winner);
         match.setStatus(status);
         match.setTerminationReason(reason);
@@ -292,8 +300,8 @@ public class MatchServiceImpl implements MatchService {
         userRepository.save(match.getWhitePlayer());
         userRepository.save(match.getBlackPlayer());
         roomRepository.save(match.getRoom());
+        match.setDrawOfferPlayerId(null);
         matchRepository.save(match);
-        drawOffers.remove(match.getRoom().getRoomCode().toUpperCase());
     }
 
     private Map<String, Object> gameStartPayload(MatchEntity match) {
@@ -341,6 +349,12 @@ public class MatchServiceImpl implements MatchService {
         payload.put("result", match.getStatus().name());
         payload.put("reason", match.getTerminationReason().name());
         payload.put("winnerId", match.getWinner() == null ? null : match.getWinner().getId().toString());
+        payload.put("rated", match.isRated());
+        payload.put("ratingApplied", false);
+        payload.put("rewardsApplied", false);
+        payload.put("statsApplied", match.isStatsApplied());
+        payload.put("settlementDecision", match.getSettlementDecision());
+        payload.put("ratingMode", match.getGameMode().name());
         payload.put("whiteEloBefore", match.getWhiteEloBefore());
         payload.put("whiteEloAfter", match.getWhiteEloAfter());
         payload.put("blackEloBefore", match.getBlackEloBefore());
@@ -357,12 +371,16 @@ public class MatchServiceImpl implements MatchService {
     }
 
     private MatchEntity requireActiveMatchForUpdate(String roomCode) {
-        MatchEntity match = matchRepository.findByRoomCodeForUpdate(roomCode)
-                .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Match not found"));
+        MatchEntity match = requireMatchForUpdate(roomCode);
         if (match.getStatus() != MatchStatus.ACTIVE) {
             throw new ApiException(ErrorCode.MATCH_NOT_ACTIVE);
         }
         return match;
+    }
+
+    private MatchEntity requireMatchForUpdate(String roomCode) {
+        return matchRepository.findByRoomCodeForUpdate(roomCode)
+                .orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Match not found"));
     }
 
     private MatchEntity requireMatch(String roomCode) {
@@ -435,6 +453,7 @@ public class MatchServiceImpl implements MatchService {
         payload.put("statistics", statisticsProjector.project(match,
                 matchMoveRepository.findAllByMatchIdOrderByMoveNumberAsc(match.getId())));
         payload.put("gameMode", match.getGameMode().name());
+        payload.put("rated", match.isRated());
         if (match.getGameMode() == GameMode.ARAM) {
             payload.put("aramSeed", match.getAramSeed());
             payload.put("aramState", aramStateCodec.decode(match.getAramState()));

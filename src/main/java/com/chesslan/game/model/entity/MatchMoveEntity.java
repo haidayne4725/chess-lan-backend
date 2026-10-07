@@ -16,6 +16,7 @@ import lombok.Setter;
 @Entity
 @Table(
         name = "match_moves",
+        indexes = @jakarta.persistence.Index(name = "idx_match_move_participant", columnList = "match_id,player_id"),
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_match_move_number", columnNames = {"match_id", "move_number"}),
                 @UniqueConstraint(name = "uk_match_request_id", columnNames = {"match_id", "request_id"})

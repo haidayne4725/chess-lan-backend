@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface MatchMoveRepository extends JpaRepository<MatchMoveEntity, UUID> {
+    boolean existsByMatchIdAndPlayerId(UUID matchId, UUID playerId);
     @EntityGraph(attributePaths = {"player"})
     List<MatchMoveEntity> findAllByMatchIdOrderByMoveNumberAsc(UUID matchId);
 

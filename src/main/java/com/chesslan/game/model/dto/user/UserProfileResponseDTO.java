@@ -15,6 +15,11 @@ public record UserProfileResponseDTO(
         Long totalWins,
         Long totalLosses,
         Long totalDraws,
+        Integer legacyMixedElo,
+        Integer classicElo,
+        Double aramRating,
+        Double aramDeviation,
+        Double aramVolatility,
         LocalDateTime createdAt
 ) {
 }

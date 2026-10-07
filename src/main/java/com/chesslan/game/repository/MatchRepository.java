@@ -15,6 +15,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface MatchRepository extends JpaRepository<MatchEntity, UUID> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from MatchEntity m where m.id = :id")
+    Optional<MatchEntity> findByIdForUpdate(@Param("id") UUID id);
+
     @EntityGraph(attributePaths = {"room", "whitePlayer", "blackPlayer", "winner"})
     Optional<MatchEntity> findByRoomRoomCodeIgnoreCase(String roomCode);
 

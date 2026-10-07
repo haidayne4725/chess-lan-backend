@@ -31,11 +31,16 @@ public class GameMapper {
                 user.getExp(),
                 nextLevelExp,
                 user.getGold(),
-                user.getElo(),
+                user.getClassicElo(),
                 user.getTotalMatches(),
                 user.getTotalWins(),
                 user.getTotalLosses(),
                 user.getTotalDraws(),
+                user.getElo(),
+                user.getClassicElo(),
+                user.getAramRating(),
+                user.getAramDeviation(),
+                user.getAramVolatility(),
                 user.getCreatedAt()
         );
     }
@@ -100,7 +105,10 @@ public class GameMapper {
                 match.getStartedAt(),
                 match.getFinishedAt(),
                 moves.stream().map(this::toMove).toList(),
-                statisticsProjector.project(match, moves)
+                statisticsProjector.project(match, moves),
+                match.isRated(),
+                match.isStatsApplied(),
+                match.getSettlementDecision()
         );
     }
 

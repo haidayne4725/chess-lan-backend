@@ -29,6 +29,9 @@ public record MatchResponseDTO(
         LocalDateTime startedAt,
         LocalDateTime finishedAt,
         List<MatchMoveResponseDTO> moves,
-        MatchStatisticsDTO statistics
+        MatchStatisticsDTO statistics,
+        boolean rated,
+        boolean statsApplied,
+        String settlementDecision
 ) {
 }
